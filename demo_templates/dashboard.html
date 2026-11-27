@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KYRO · Operations desk</title>
+<link rel="stylesheet" href="{{ url_for('static',filename='desk.css') }}">
+<script defer src="{{ url_for('static',filename='desk.js') }}"></script>
+</head>
+<body>
+<header><a class="brand" href="#overview">KYRO</a><span class="product">Operations desk</span><span id="health" role="status">Checking system</span></header>
+<nav aria-label="Workspace">{% for key,title in [('overview','Overview'),('intake','Case intake'),('queue','Case queue'),('roster','Doctor workspace'),('model','Model report'),('activity','Activity')] %}<a href="#{{key}}" data-view="{{key}}">{{title}}</a>{% endfor %}</nav>
+<main>
+<p class="notice"><strong>Academic simulation</strong> &nbsp; Use fictional adult cases only. Every assignment requires human review. KYRO has no clinical validation.</p>
+<p id="message" role="status" aria-live="polite"></p>
+<section id="overview"><div class="heading"><h1>Operations overview</h1><a class="primary" href="#intake">New fictional case</a></div>
+<div id="stats" class="stats"></div><div class="split"><article><h2>Reviewed case mix</h2><div id="mix"></div></article><article><h2>Service activity</h2><div id="timings"></div></article></div>
+<article><div class="heading"><h2>Waiting for capacity</h2><a href="#queue">Open case queue</a></div><div id="waiting"></div></article></section>
+<section id="intake" hidden><h1>Case intake</h1><article><form id="case-form">
+<div class="heading"><h2>Fictional scenario</h2><label>Load preset<select id="preset"><option value="">Choose scenario</option><option value="routine">General visit</option><option value="cardiac">Cardiology transfer</option><option value="resp">Respiratory review</option></select></label></div>
+<div class="fields"><label>Case label<input name="name" maxlength="80" required></label>
+<label>Age (years)<input name="age" type="number" min="18" max="90" required></label>
+<label>Gender<select name="gender"><option>male</option><option>female</option><option>other</option></select></label>
+<label>Requested specialty<select name="specialty">{% for s in ('general','cardiology','respiratory','trauma') %}<option>{{s}}</option>{% endfor %}</select></label></div>
+<label>Fictional symptoms for human review<textarea name="symptoms" maxlength="500" rows="2"></textarea></label>
+<h2>Vital signs</h2><div class="fields">
+{% for k,title,lo,hi in [('heart_rate','Heart rate (bpm)',20,250),('systolic_bp','Systolic BP (mmHg)',40,300),('diastolic_bp','Diastolic BP (mmHg)',20,200),('respiratory_rate','Respiratory rate (/min)',5,80),('pain_scale','Pain score (0–10)',0,10),('oxygen_saturation','Oxygen saturation (%)',1,100)] %}
+<label>{{ title }}<input type="number" name="{{k}}" min="{{lo}}" max="{{hi}}" step="any" required></label>{% endfor %}
+<label>Temperature<input type="number" name="temperature" step="any" required></label><label>Temperature unit<select name="temperature_unit"><option>C</option><option>F</option></select></label></div>
+<h2>Arrival and history</h2><div class="fields">{% for k,title in [('immediate_triage','Prior immediate triage'),('arrival_by_ems','EMS arrival')] %}<label>{{title}}<select name="{{k}}"><option value="0">No</option><option value="1">Yes</option></select></label>{% endfor %}</div>
+<fieldset><legend>Chronic conditions</legend><div class="checks">{% for cond in ('asthma','cancer','ckd','copd','chf','cad','diabetes_type1','diabetes_type2','esrd','htn','obesity','osa') %}<label><input type="checkbox" name="conditions" value="{{cond}}">{{cond|replace('_',' ')}}</label>{% endfor %}</div></fieldset>
+<label class="check"><input type="checkbox" name="confirm" required>I confirm that this case is fictional.</label>
+<button type="submit">Run AI triage</button></form></article></section>
+<section id="queue" hidden><h1>Case queue</h1><article><div class="fields"><label>Find case<input id="search" type="search" placeholder="Case label or specialty"></label><label>Workflow state<select id="filter"><option value="active">Active cases</option>{% for k,title in [('review','Pending review'),('waiting','Waiting'),('assigned','Assigned'),('in_treatment','In treatment'),('completed','Completed (latest 50)')] %}<option value="{{k}}">{{title}}</option>{% endfor %}</select></label></div><div class="scroll"><table><thead><tr><th>Case / arrival (UTC)</th><th>AI / reviewed</th><th>State / doctor</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div></article></section>
+<section id="roster" hidden><div class="heading"><h1>Doctor workspace</h1><button id="add-doctor">Register fictional doctor</button></div><div class="cards" id="doctors"></div></section>
+<section id="model" hidden><h1>Model report</h1><article id="model-report"></article></section>
+<section id="activity" hidden><h1>Activity history</h1><article id="events"></article></section>
+</main>
+<dialog id="inspector"><div class="heading"><h2 id="case-title">Triage inspector</h2><button class="secondary" data-close>Close</button></div><div id="inspection"></div><p id="review-status" role="status"></p>
+<form id="review-form"><h3>Human review</h3><div class="fields"><label>Confirmed severity<select name="severity" required><option value="">Choose severity</option>{% for l in ('Low','Medium','High','Critical') %}<option value="{{loop.index0}}">{{l}}</option>{% endfor %}</select></label><label>Routing specialty<select name="specialty">{% for s in ('general','cardiology','respiratory','trauma') %}<option>{{s}}</option>{% endfor %}</select></label></div><button>Confirm review</button></form></dialog>
+<dialog id="doctor-dialog"><div class="heading"><h2>Doctor settings</h2><button class="secondary" data-close>Close</button></div><form id="doctor-form"><label>Fictional name<input name="name" maxlength="80" required></label><label>Specialty<select name="specialty">{% for s in ('general','cardiology','respiratory','trauma') %}<option>{{s}}</option>{% endfor %}</select></label><label>Maximum capacity<input name="capacity" type="number" min="1" max="50" required></label><label class="check"><input name="available" type="checkbox">Accept new cases</label><p id="doctor-error" role="status"></p><button>Save doctor</button></form></dialog>
+</body></html>

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from app.ai.inference import predict_severity, explain_prediction
+from app.ai.inference import explain_prediction
 from app.core.config import settings
 from app.core.errors import AssignmentError
 from app.core.logging import get_logger
@@ -40,13 +40,10 @@ def run_triage(patient_id: str, patient_data: Dict[str, Any]) -> Dict[str, Any]:
     dict  — The persisted triage_log row.
     """
     # Step 1 — Predict severity
-    severity, confidence, _ = predict_severity(patient_data)
-    severity_label = settings.ai.SEVERITY_CLASSES.get(severity, "Unknown")
-    logger.info("Triage for patient %s → severity=%d (%s) confidence=%.3f",
-                patient_id, severity, severity_label, confidence)
-
-    # Step 2 — Explain
     shap_summary = explain_prediction(patient_data)
+    severity = shap_summary["predicted_class"]
+    confidence = shap_summary["confidence"]
+    severity_label = shap_summary["predicted_label"]
 
     # Step 3 — Assign doctor
     assigned_doctor_id = _assign_doctor(severity)
@@ -88,8 +85,7 @@ def _assign_doctor(severity: int) -> str | None:
         return None
 
     increment_load(doctor["id"])
-    logger.info("Assigned doctor %s (load→%d) for severity=%d",
-                doctor["id"], doctor["current_load"] + 1, severity)
+    logger.info("Legacy assignment completed")
     return doctor["id"]
 
 

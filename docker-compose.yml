@@ -1,27 +1,9 @@
-# ============================================================
-# Kyro — Docker Compose (Development)
-# ============================================================
-
-version: "3.9"
-
 services:
-  kyro-api:
+  kyro-demo:
     build: .
-    container_name: kyro-api
     ports:
-      - "5000:5000"
-    env_file:
-      - .env
-    environment:
-      - FLASK_ENV=development
-      - FLASK_DEBUG=1
+      - "127.0.0.1:5000:5000"
     volumes:
-      - .:/app
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  # Future: Redis cache
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
+      - demo-state:/app/demo_data
+volumes:
+  demo-state:

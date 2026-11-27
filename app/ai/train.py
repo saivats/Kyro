@@ -292,7 +292,7 @@ def _save_artifacts(
         "severity_classes": {str(k): v for k, v in settings.ai.SEVERITY_CLASSES.items()},
         "cv_macro_f1_mean": round(float(cv_scores.mean()), 4),
         "cv_macro_f1_std": round(float(cv_scores.std()), 4),
-        "xgb_params": xgb_model.get_params(),
+        "xgb_params": {**xgb_model.get_params(), "missing": None},
         "feature_importance_top10": dict(list(importance_sorted.items())[:10]),
         "class_distribution_test": {
             str(k): int(v) for k, v in
@@ -312,7 +312,7 @@ def _save_artifacts(
                 return obj.tolist()
             return super().default(obj)
 
-    meta_path.write_text(json.dumps(meta, indent=2, cls=NumpyEncoder))
+    meta_path.write_text(json.dumps(meta, indent=2, cls=NumpyEncoder, allow_nan=False))
     logger.info("Model metadata saved → %s", meta_path)
 
 

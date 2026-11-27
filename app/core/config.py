@@ -5,6 +5,7 @@ Loads environment variables and provides typed config objects.
 """
 
 import os
+from pathlib import Path
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
@@ -16,7 +17,7 @@ class FlaskConfig:
     """Flask server configuration."""
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-change-me")
     DEBUG: bool = os.getenv("FLASK_DEBUG", "0") == "1"
-    HOST: str = os.getenv("HOST", "0.0.0.0")
+    HOST: str = os.getenv("HOST", "127.0.0.1")
     PORT: int = int(os.getenv("PORT", "5000"))
 
 
@@ -37,7 +38,7 @@ class SupabaseConfig:
 @dataclass(frozen=True)
 class AIConfig:
     """AI model configuration."""
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "app/ai/artifacts/xgb_severity_model.json")
+    MODEL_PATH: str = os.getenv("MODEL_PATH", str(Path(__file__).resolve().parents[1] / "ai/artifacts/xgb_severity_model.json"))
     MODEL_VERSION: str = os.getenv("MODEL_VERSION", "1.0.0")
     SEVERITY_CLASSES: dict = field(default_factory=lambda: {
         0: "Low",

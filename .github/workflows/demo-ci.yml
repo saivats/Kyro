@@ -1,0 +1,48 @@
+name: KYRO demo tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-demo.txt
+      - run: python -m pip install -r requirements-demo.txt pytest playwright
+      - run: python -m pytest -q
+      - run: python tests/browser_workflow.py
+        env:
+          KYRO_BROWSER_CHANNEL: chrome
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: .\setup.bat
+      - run: |
+          $env:KYRO_DEMO_DB = Join-Path $env:RUNNER_TEMP "kyro-launch.sqlite3"
+          $server = Start-Process -FilePath "cmd.exe" -ArgumentList "/c start.bat" -WindowStyle Hidden -PassThru
+          try {
+            $ok = $false
+            for ($i=0; $i -lt 30; $i++) {
+              try {
+                if ((Invoke-RestMethod http://127.0.0.1:5000/health/ready).status -eq "ready") { $ok = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ok) { throw "Windows launcher failed readiness" }
+            if ((Invoke-WebRequest http://127.0.0.1:5000/).StatusCode -ne 200) { throw "Dashboard unavailable" }
+          } finally {
+            if (-not $server.HasExited) { taskkill /PID $server.Id /T /F }
+          }
+      - run: .\.venv\Scripts\python -m pip install pytest
+      - run: .\.venv\Scripts\python -m pytest -q
