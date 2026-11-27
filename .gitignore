@@ -36,3 +36,7 @@ docker-compose.override.yml
 dist/
 build/
 *.egg-info/
+
+# Local synthetic demo state
+demo_data/
+.pytest_cache/

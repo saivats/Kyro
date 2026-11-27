@@ -2,9 +2,13 @@
 
 **AI-Based Medical Triage & Dynamic Doctor Assignment System**
 
-A production-grade Flask backend using Supabase (PostgreSQL), XGBoost severity prediction, SHAP explainability, and dynamic doctor queue management.
+A research-prototype Flask backend using Supabase (PostgreSQL), XGBoost severity prediction, SHAP explainability, and dynamic doctor queue management.
 
 ---
+
+## Local academic demo
+
+See [DEMO.md](DEMO.md) for the local synthetic-only dashboard, human-reviewed workflow, and setup without Supabase. Neither backend is clinically validated or suitable for live patient use.
 
 ## Architecture
 
