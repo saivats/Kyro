@@ -183,5 +183,4 @@ def build_feature_vector(patient_data: Dict[str, Any]) -> pd.DataFrame:
     # Ensure column order matches training
     df = df[ALL_FEATURES]
 
-    logger.debug("Feature vector built: %s", {k: features[k] for k in list(features)[:6]})
     return df

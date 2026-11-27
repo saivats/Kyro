@@ -1,161 +1,82 @@
-"""
-Kyro — AI Inference Pipeline (Emergency-Optimized)
-
-Loads the trained XGBoost model and provides:
-  • predict_severity()  — severity class + confidence
-  • explain_prediction() — SHAP feature importance
-"""
-
+"""Prediction and exact TreeSHAP contributions from the committed multiclass booster."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from threading import RLock
 
 import numpy as np
-import pandas as pd
-import shap
-from xgboost import XGBClassifier
+import xgboost as xgb
 
-from app.ai.features import build_feature_vector, get_feature_names, ALL_FEATURES
+from app.ai.features import ALL_FEATURES, build_feature_vector
 from app.core.config import settings
 from app.core.errors import AIModelError
-from app.core.logging import get_logger
 
-logger = get_logger("ai.inference")
-
-# Module-level cache
-_model: XGBClassifier | None = None
-_explainer: shap.TreeExplainer | None = None
+_lock = RLock()
+_model = None
 
 
-def _load_model() -> XGBClassifier:
-    """Load XGBoost model from disk (cached)."""
+def _read_model():
+    candidate = xgb.Booster(params={"nthread": 1})
+    candidate.load_model(Path(settings.ai.MODEL_PATH))
+    candidate.set_param({"nthread": 1})
+    if candidate.feature_names != ALL_FEATURES:
+        raise AIModelError("Model feature contract mismatch")
+    return candidate
+
+
+def reload_model():
     global _model
-    if _model is not None:
+    with _lock:
+        _model = _read_model()
+
+
+def get_model():
+    global _model
+    with _lock:
+        if _model is None:
+            _model = _read_model()
         return _model
 
-    model_path = settings.ai.MODEL_PATH
-    if not Path(model_path).exists():
-        raise AIModelError(
-            f"Model file not found at '{model_path}'. "
-            "Run `python -m app.ai.train` first."
-        )
 
-    _model = XGBClassifier()
-    _model.load_model(model_path)
-    logger.info("XGBoost model loaded from %s (features: %d)", model_path, len(ALL_FEATURES))
-    return _model
-
-
-def _get_explainer() -> shap.TreeExplainer:
-    """Return a SHAP TreeExplainer (cached)."""
-    global _explainer
-    if _explainer is None:
-        _explainer = shap.TreeExplainer(_load_model())
-        logger.info("SHAP TreeExplainer initialised")
-    return _explainer
-
-
-def predict_severity(patient_data: Dict[str, Any]) -> Tuple[int, float, np.ndarray]:
-    """
-    Predict severity for a single patient.
-
-    Parameters
-    ----------
-    patient_data : dict
-        Raw patient intake dict (age, gender, vitals, history, etc.).
-
-    Returns
-    -------
-    (severity_level, confidence_score, probabilities)
-    """
-    try:
-        model = _load_model()
-        X = build_feature_vector(patient_data)
-        proba = model.predict_proba(X)[0]  # shape (4,)
-        severity = int(np.argmax(proba))
-        confidence = float(proba[severity])
-
-        logger.info(
-            "Prediction: severity=%d (%s)  confidence=%.3f  proba=%s",
-            severity,
-            settings.ai.SEVERITY_CLASSES.get(severity, "Unknown"),
-            confidence,
-            proba.round(3).tolist(),
-        )
-        return severity, confidence, proba
-    except AIModelError:
-        raise
-    except Exception as exc:
-        logger.exception("Severity prediction failed")
-        raise AIModelError(f"Prediction failed: {exc}") from exc
-
-
-def explain_prediction(patient_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Generate SHAP explanation for a single patient prediction.
-
-    Returns
-    -------
-    dict with keys: predicted_class, predicted_label,
-                    feature_importance (sorted by |shap_value|),
-                    risk_factors (top contributing features).
-    """
-    try:
-        explainer = _get_explainer()
-        X = build_feature_vector(patient_data)
-        shap_values = explainer.shap_values(X)
-
-        severity, confidence, _ = predict_severity(patient_data)
-        feature_names = get_feature_names()
-
-        # SHAP values format varies by version:
-        # - shap <0.45: list of 2D arrays, one per class
-        # - shap >=0.45: single 3D array (n_samples, n_features, n_classes)
-        if isinstance(shap_values, list):
-            class_shap = shap_values[severity][0]
-        elif shap_values.ndim == 3:
-            class_shap = shap_values[0, :, severity]
-        else:
-            class_shap = shap_values[0]
-
-        importance = sorted(
-            zip(feature_names, class_shap.tolist()),
-            key=lambda x: abs(x[1]),
-            reverse=True,
-        )
-
-        # Identify top risk factors (positive SHAP = pushes toward this class)
-        risk_factors = [
-            {"feature": f, "shap_value": round(v, 4), "direction": "risk" if v > 0 else "protective"}
-            for f, v in importance[:10]
+def infer(patient_data, *, explain=True):
+    model = get_model()
+    row = xgb.DMatrix(build_feature_vector(patient_data), nthread=1)
+    probabilities = model.predict(row, strict_shape=True)[0]
+    if (probabilities.shape != (4,) or not np.isfinite(probabilities).all()
+            or np.any(probabilities < 0) or np.any(probabilities > 1)
+            or not np.isclose(probabilities.sum(), 1.0, atol=1e-6)):
+        raise AIModelError("Invalid probability vector")
+    severity = int(probabilities.argmax())
+    result = {
+        "predicted_class": severity,
+        "predicted_label": settings.ai.SEVERITY_CLASSES[severity],
+        "confidence": float(probabilities[severity]),
+        "probabilities": probabilities.tolist(),
+    }
+    if explain:
+        values = model.predict(row, pred_contribs=True, strict_shape=True)[0]
+        if values.shape != (4, len(ALL_FEATURES) + 1) or not np.isfinite(values).all():
+            raise AIModelError("Invalid contribution matrix")
+        weights = values[severity, :-1]
+        result["base_margin"] = float(values[severity, -1])
+        result["feature_importance"] = [
+            {"feature": ALL_FEATURES[i], "shap_value": float(weights[i])}
+            for i in np.argsort(-np.abs(weights), kind="stable")
         ]
-
-        summary = {
-            "predicted_class": severity,
-            "predicted_label": settings.ai.SEVERITY_CLASSES.get(severity, "Unknown"),
-            "confidence": round(confidence, 4),
-            "feature_importance": [
-                {"feature": f, "shap_value": round(v, 4)} for f, v in importance
-            ],
-            "risk_factors": risk_factors,
-        }
-        logger.debug("SHAP explanation generated for severity=%d", severity)
-        return summary
-    except AIModelError:
-        raise
-    except Exception as exc:
-        logger.exception("SHAP explanation failed")
-        raise AIModelError(f"Explanation failed: {exc}") from exc
+    return result
 
 
-def reload_model() -> None:
-    """Force-reload the model from disk (useful after retraining)."""
-    global _model, _explainer
-    _model = None
-    _explainer = None
-    _load_model()
-    logger.info("Model reloaded from disk")
-    _load_model()
-    logger.info("Model reloaded from disk")
+def predict_severity(patient_data):
+    result = infer(patient_data, explain=False)
+    return result["predicted_class"], result["confidence"], np.array(result["probabilities"])
+
+
+def explain_prediction(patient_data):
+    result = infer(patient_data)
+    # Preserve the legacy response field. Its values describe class direction.
+    result["risk_factors"] = [
+        {**item, "direction": "toward" if item["shap_value"] > 0 else
+         "away" if item["shap_value"] < 0 else "neutral"}
+        for item in result["feature_importance"][:10]
+    ]
+    return result

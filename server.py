@@ -19,17 +19,17 @@ Endpoints:
 from __future__ import annotations
 
 import json
-import traceback
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
 # ── AI imports ──────────────────────────────────────────────────
-from app.ai.inference import predict_severity, explain_prediction, reload_model
+from app.ai.inference import predict_severity, explain_prediction, get_model
 from app.ai.features import ALL_FEATURES, CHRONIC_CONDITION_COLS
 from app.core.config import settings
 
 app = Flask(__name__)
+app.config.update(MAX_CONTENT_LENGTH=256*1024, TRUSTED_HOSTS=["localhost", "127.0.0.1", "[::1]"])
 
 # Severity label map
 SEVERITY_LABELS = {0: "Low", 1: "Medium", 2: "High", 3: "Critical"}
@@ -71,6 +71,8 @@ def patient_intake():
         return jsonify({"error": "Request body must be valid JSON."}), 400
 
     # Normalize: history.conditions → history.chronic_conditions
+    if not isinstance(data, dict) or not isinstance(data.get("history", {}), dict):
+        return jsonify(error="Expected an object for the case and history."), 400
     history = data.get("history", {})
     if "conditions" in history and "chronic_conditions" not in history:
         history["chronic_conditions"] = history.pop("conditions")
@@ -84,8 +86,10 @@ def patient_intake():
         import uuid
         patient_id = str(uuid.uuid4())
 
-        severity, confidence, probabilities = predict_severity(data)
         explanation = explain_prediction(data)
+        severity = explanation["predicted_class"]
+        confidence = explanation["confidence"]
+        probabilities = explanation["probabilities"]
 
         return jsonify({
             "patient": {
@@ -108,8 +112,8 @@ def patient_intake():
             },
             "message": "Patient intake processed and triage completed.",
         }), 201
-    except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    except Exception:
+        return jsonify({"error": "Inference unavailable."}), 500
 
 
 # ────────────────────────────────────────────────────────────────
@@ -117,12 +121,14 @@ def patient_intake():
 # ────────────────────────────────────────────────────────────────
 @app.route("/api/health", methods=["GET"])
 def health():
-    model_exists = Path(settings.ai.MODEL_PATH).exists()
+    try:
+        get_model()
+    except Exception:
+        return jsonify(status="unavailable", model_loaded=False), 503
     return jsonify({
         "status": "healthy",
         "service": "kyro-triage-ai",
-        "model_loaded": model_exists,
-        "model_path": settings.ai.MODEL_PATH,
+        "model_loaded": True,
         "features_count": len(ALL_FEATURES),
     })
 
@@ -175,8 +181,8 @@ def predict():
                 for i, p in enumerate(probabilities)
             },
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    except Exception:
+        return jsonify({"error": "Inference unavailable."}), 500
 
 # ────────────────────────────────────────────────────────────────
 # POST /api/explain — Prediction + SHAP explanation
@@ -198,8 +204,8 @@ def explain():
     try:
         explanation = explain_prediction(data)
         return jsonify(explanation)
-    except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    except Exception:
+        return jsonify({"error": "Inference unavailable."}), 500
 
 
 # ────────────────────────────────────────────────────────────────
@@ -241,11 +247,11 @@ def batch_predict():
                     for j, p in enumerate(probabilities)
                 },
             })
-        except Exception as e:
+        except Exception:
             results.append({
                 "index": i,
                 "name": patient.get("name", f"Patient-{i}"),
-                "error": str(e),
+                "error": "Invalid input or inference unavailable.",
             })
 
     return jsonify({
@@ -283,11 +289,7 @@ def model_info():
 @app.route("/api/model/reload", methods=["POST"])
 def model_reload():
     """Reload the XGBoost model from disk (after retraining)."""
-    try:
-        reload_model()
-        return jsonify({"message": "Model reloaded successfully."})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(error="Restart the local process to load a new model."), 403
 
 
 # ────────────────────────────────────────────────────────────────
@@ -295,12 +297,16 @@ def model_reload():
 # ────────────────────────────────────────────────────────────────
 def _validate_patient(data: dict) -> str | None:
     """Basic validation — returns error string or None."""
+    if not isinstance(data, dict):
+        return "Expected a JSON object"
     if "age" not in data:
         return "Missing required field: 'age'"
     if "vitals" not in data:
         return "Missing required field: 'vitals'"
     vitals = data["vitals"]
-    required_vitals = ["heart_rate", "systolic_bp", "diastolic_bp"]
+    if not isinstance(vitals, dict):
+        return "Expected an object for vitals"
+    required_vitals = ["heart_rate", "systolic_bp", "diastolic_bp", "temperature", "respiratory_rate", "pain_scale"]
     for v in required_vitals:
         if v not in vitals:
             return f"Missing required vital: '{v}'"
@@ -334,7 +340,7 @@ def method_not_allowed(_):
 
 @app.errorhandler(500)
 def internal_error(e):
-    return jsonify({"error": "Internal server error.", "details": str(e)}), 500
+    return jsonify({"error": "Internal server error."}), 500
 
 
 # ────────────────────────────────────────────────────────────────
@@ -358,4 +364,4 @@ if __name__ == "__main__":
     print("    POST /api/model/reload   — Reload model")
     print("=" * 55)
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

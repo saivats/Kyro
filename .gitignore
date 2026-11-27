@@ -40,3 +40,10 @@ build/
 # Local synthetic demo state
 demo_data/
 .pytest_cache/
+
+*.sqlite*
+*.db
+*.db-wal
+*.db-shm
+.env.*
+!.env.example
